@@ -16,18 +16,23 @@
     "sass": "^1.57.1",
     "web-vitals": "^2.1.4"
   },
+
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+
+    "test:ci": "CI=true react-scripts test --coverage --watchAll=false --passWithNoTests"
   },
+
   "eslintConfig": {
     "extends": [
       "react-app",
       "react-app/jest"
     ]
   },
+
   "browserslist": {
     "production": [
       ">0.2%",
@@ -40,7 +45,13 @@
       "last 1 safari version"
     ]
   },
+
   "devDependencies": {
     "jest-junit": "^17.0.0"
+  },
+
+  "jest-junit": {
+    "outputDirectory": "./reports",
+    "outputName": "junit.xml"
   }
 }
