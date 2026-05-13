@@ -2,6 +2,7 @@
   "name": "zomato_clone",
   "version": "0.1.0",
   "private": true,
+
   "dependencies": {
     "@emotion/react": "^11.10.5",
     "@emotion/styled": "^11.10.5",
@@ -20,10 +21,8 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-
     "test": "react-scripts test",
-
-    "test:ci": "CI=true react-scripts test --coverage --watchAll=false --passWithNoTests"
+    "test:ci": "cross-env CI=true react-scripts test --coverage --watchAll=false --passWithNoTests"
   },
 
   "eslintConfig": {
@@ -47,6 +46,7 @@
   },
 
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "jest-junit": "^17.0.0"
   },
 
