@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders application', () => {
+test('renders search input', () => {
+
   render(<App />);
-  expect(screen.getByText(/zomato/i)).toBeInTheDocument();
+
+  const inputElement = screen.getByPlaceholderText(
+    /search for restaurant, cuisine or a dish/i
+  );
+
+  expect(inputElement).toBeInTheDocument();
 });
