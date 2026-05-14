@@ -3,7 +3,6 @@ pipeline{
     tools{
         nodejs 'node16'
         jdk 'jdk17'
-        dependency-check 'Dp-Check'
     }
     environment{
         SCANNER_HOME= tool 'mysonar'
@@ -59,19 +58,23 @@ pipeline{
                 }
             }
         }
-       stage("OWASP Scan") {
-           steps {
-               sh 'mkdir -p ${WORKSPACE}/dependency-check-report'
-               dependencyCheck additionalArguments: """
-               --scan ${WORKSPACE}
-               --format XML
-               --out ${WORKSPACE}/dependency-check-report
-               --prettyPrint
-               """, odcInstallation: 'DP-Check'
-               sh 'ls -la ${WORKSPACE}/dependency-check-report/'  // ← confirm file exists
-               dependencyCheckPublisher(pattern: '**/dependency-check-report/dependency-check-report.xml')
-           }
-       }
+       stage('OWASP'){
+            steps{
+                dependencyCheck additionalArguments: '''
+                --scan ./
+                --format XML
+                --format HTML
+                --disableYarnAudit
+                --disableNodeAudit
+                ''', odcInstallation: 'Dp-check', nvdCredentialsId: 'nvd-api'
+            }
+            post{
+                always{
+                    dependencyCheckPublisher(
+                        pattern: '**/dependency-check-report.xml')
+                }
+            }
+        }
         stage("Build"){
             steps{
                 sh 'npm run build'
