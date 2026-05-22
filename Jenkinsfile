@@ -1,122 +1,231 @@
-pipeline{
+pipeline {
     agent any
-    tools{
+
+    tools {
         nodejs 'node16'
         jdk 'jdk17'
     }
-    environment{
-        SCANNER_HOME= tool 'mysonar'
-    }
-    stages{
-        stage("clean"){
-            steps{
-                cleanWs()
-            }
+
+    environment {
+        SCANNER_HOME   = tool 'mysonar'
+        DOCKER_IMAGE   = 'swiggy-app'
+        DOCKER_TAG     = "1.0.${env.BUILD_NUMBER}"
+        CONTAINER_NAME = 'swiggy-app'
+        CONTAINER_PORT = '3000'
+        HOST_PORT      = '5453'
         }
-        stage("checkout"){
-            steps{
+
+    stages {
+
+        // ─────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
                 git branch: 'main',
                     url: 'https://github.com/Nikhil-5453/Zomato-project.git'
+                script {
+                    env.GIT_COMMIT  = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.GIT_BRANCH  = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                }
+                echo "Checked out commit ${env.GIT_COMMIT} on branch ${env.GIT_BRANCH}"
+                echo "App Version: ${env.APP_VERSION}"
             }
         }
-        stage("Install dependency"){
-            steps{
+
+        // ─────────────────────────────────────────────
+        stage('Install Dependencies') {
+            steps {
                 sh 'npm install'
             }
         }
-        stage("test"){
-            steps{
+
+        // ─────────────────────────────────────────────
+        stage('Test') {
+            steps {
                 sh '''
-                CI=true npm run test:ci -- \
-                --reporters=default \
-                --reporters=jest-junit
+                    CI=true npm run test:ci -- \
+                    --reporters=default \
+                    --reporters=jest-junit
                 '''
             }
-        }
-        stage("SonarQube Analysis"){
-            steps{
-                withSonarQubeEnv('mysonar'){
-                    sh '''
-                    $SCANNER_HOME/bin/sonar-scanner \
-                    -Dsonar.projectKey=Zomato-clone \
-                    -Dsonar.projectName=Zomato-clone \
-                    -Dsonar.projectVersion=1.0 \
-                    -Dsonar.sources=src \
-                    -Dsonar.tests=src \
-                    -Dsonar.test.inclusions=src/**/*.test.js \
-                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-                    -Dsonar.junit.reportPaths=reports/junit.xml \
-                    -Dsonar.sourceEncoding=UTF-8
-                    '''
+            post {
+                always {
+                    // Publish JUnit results regardless of pass/fail
+                    junit allowEmptyResults: true, testResults: 'reports/junit.xml'
                 }
             }
         }
-        stage('Quality Gate'){
-            steps{
-                timeout(time: 20, unit: 'MINUTES'){
+
+        // ─────────────────────────────────────────────
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('mysonar') {
+                    sh """
+                         $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=Zomato-clone \
+                        -Dsonar.projectName=Zomato-clone \
+                        -Dsonar.projectVersion=1.0 \
+                        -Dsonar.sources=src \
+                        -Dsonar.tests=src \
+                        -Dsonar.test.inclusions=src/**/*.test.js \
+                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                        -Dsonar.junit.reportPaths=reports/junit.xml \
+                        -Dsonar.sourceEncoding=UTF-8
+                    """
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 20, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
         }
-       stage('OWASP'){
-            steps{
-                dependencyCheck additionalArguments: '''
-                --scan ./
-                --format XML
-                --format HTML
-                --disableYarnAudit
-                --disableNodeAudit
-                ''', odcInstallation: 'Dp-check', nvdCredentialsId: 'nvd-api'
+
+        // ─────────────────────────────────────────────
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck(
+                    additionalArguments: '--scan ./ --out ./ --format XML --format HTML --disableYarnAudit --disableNodeAudit',
+                    odcInstallation: 'Dp-check',
+                    nvdCredentialsId: 'nvd-api-key')
             }
-            post{
-                always{
-                    dependencyCheckPublisher(
-                        pattern: '**/dependency-check-report.xml')
+            post {
+                always {
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
                 }
             }
         }
-        stage("Build"){
-            steps{
+
+        // ─────────────────────────────────────────────
+        stage('Build') {
+            steps {
                 sh 'npm run build'
             }
         }
-        stage("Docker-Image"){
-            steps{
-                sh 'docker build -t image1 .'
+
+        // ─────────────────────────────────────────────
+        stage('Docker Image Build') {
+            steps {
+                sh """
+                    docker build --no-cache \
+                    --label "build_number=${BUILD_NUMBER}" \
+                    -t ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                    .
+                """
+                echo "Docker image ${DOCKER_IMAGE}:${DOCKER_TAG} built successfully"
             }
         }
-        stage("trivy"){
-            steps{
-                sh 'trivy fs . >> trivyfs.txt'
+
+        // ─────────────────────────────────────────────
+        stage('Trivy Image Scan') {
+            steps {
+                sh """
+                    trivy image \
+                    --format table \
+                    --severity HIGH,CRITICAL \
+                    --scanners vuln \
+                    --output trivyfs.txt \
+                    ${DOCKER_IMAGE}:${DOCKER_TAG}
+                """
+                archiveArtifacts artifacts: 'trivyfs.txt', allowEmptyArchive: true
             }
         }
-        stage("Imagescan"){
-            steps{
-                sh 'trivy image image1'
-            }
-        }
-        stage("image push"){
-            steps{
-                script{
+
+        // ─────────────────────────────────────────────
+        stage('Push Image to Docker Hub') {
+            steps {
+                script {
                     withDockerRegistry(credentialsId: 'docker-creds') {
-                        sh 'docker tag image1 nikhil74/zomato-app:v1'
-                        sh 'docker push nikhil74/zomato-app:v1'
+                        sh """
+                            docker tag  ${DOCKER_IMAGE}:${DOCKER_TAG} nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG}
+                            docker push nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG}
+                        """
                     }
+                }
+                echo "Docker image nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG} pushed successfully"
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        stage('Container Deployment') {
+            steps {
+                script {
+                    // Stop and remove old container if it exists
+                    sh """
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker rmi \$(docker images -q) || true
+                    """
+
+                    echo "Existing container ${CONTAINER_NAME} stopped and removed"
+
+                    // Pull the freshly pushed image from Docker Hub
+                    sh "docker pull nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    echo "Image nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG} pulled successfully"
+
+                    sh """
+                        docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        -p ${HOST_PORT}:${CONTAINER_PORT} \
+                        nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG}
+                    """
+
+                    sh "docker ps | grep ${CONTAINER_NAME}"
+                    echo "Container ${CONTAINER_NAME} deployed on port ${HOST_PORT}"
                 }
             }
         }
-        stage("Deployment"){
-            steps{
-                sh 'docker run -d --name Zomato-app -p 5453:3000 nikhil74/zomato-app:v1'
+
+        // ─────────────────────────────────────────────
+        stage('Health Check') {
+            steps {
+                sh """
+                    # Wait for the application to start
+                    sleep 10
+
+                    # Check if the application is responding
+                    if curl -sf http://localhost:${HOST_PORT}; then
+                        echo "Health check passed: Application is responding"
+                    else
+                        echo "Health check failed: Application is not responding"
+                        exit 1
+                    fi
+                """
             }
         }
     }
-    post{
-        success{
-            echo 'Pipleine executed successfully'
+
+    // ─────────────────────────────────────────────────
+    post {
+        success {
+            echo "Pipeline executed successfully — ${DOCKER_IMAGE}:${DOCKER_TAG} deployed on port ${HOST_PORT}"
+            emailext(
+                to: "${env.RECIPIENTS}",
+                subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "Pipeline completed successfully.\nDetails: ${env.BUILD_URL}"
+            )
         }
-        failure{
-            echo "Pipline failed"
+        failure {
+            echo "Pipeline failed — Build ${env.BUILD_NUMBER} of ${DOCKER_IMAGE}:${DOCKER_TAG} failed to deploy"
+            emailext(
+                to: "${env.RECIPIENTS}",
+                subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "Pipeline failed.\nDetails: ${env.BUILD_URL}"
+            )
+        }
+        always {
+            // Clean up only the specific build image; avoid wiping legitimately cached layers
+            sh """
+                docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}        || true
+                docker rmi nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG} || true
+                docker image prune -f                            || true
+            """
+            echo "Old Docker images cleaned up"
+            //cleanWs()
         }
     }
 }
