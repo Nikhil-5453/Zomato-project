@@ -95,8 +95,7 @@ pipeline {
                 --disableNodeAudit
             ''',
             odcInstallation: 'Dp-check',
-            nvdCredentialsId: 'nvd-api-key'    // ← plugin reads secret and passes --nvdApiKey internally
-)
+            nvdCredentialsId: 'nvd-api-key')
             post {
                 always {
                     dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
