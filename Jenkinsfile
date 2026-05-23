@@ -85,12 +85,18 @@ pipeline {
 
         // ─────────────────────────────────────────────
         stage('OWASP Dependency Check') {
-            steps {
-                dependencyCheck(
-                    additionalArguments: '--scan ./ --out ./ --format XML --format HTML --disableYarnAudit --disableNodeAudit',
-                    odcInstallation: 'Dp-check'
-                    )
-            }
+            dependencyCheck(
+                additionalArguments: '''
+                --scan ./
+                --out ./
+                --format XML
+                --format HTML
+                --disableYarnAudit
+                --disableNodeAudit
+            ''',
+            odcInstallation: 'Dp-check',
+            nvdCredentialsId: 'nvd-api-key'    // ← plugin reads secret and passes --nvdApiKey internally
+)
             post {
                 always {
                     dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
