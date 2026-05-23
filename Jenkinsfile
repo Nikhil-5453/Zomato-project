@@ -9,8 +9,8 @@ pipeline {
     environment {
         SCANNER_HOME   = tool 'mysonar'
         DOCKER_IMAGE   = 'swiggy-app'
-        DOCKER_TAG     = "1.0.${env.BUILD_NUMBER}"
-        CONTAINER_NAME = 'swiggy-app'
+        DOCKER_TAG     = "${env.BUILD_NUMBER}"
+        CONTAINER_NAME = 'Swiggy-app-container'
         CONTAINER_PORT = '3000'
         HOST_PORT      = '5453'
         }
@@ -27,7 +27,6 @@ pipeline {
                     env.GIT_BRANCH  = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
                 }
                 echo "Checked out commit ${env.GIT_COMMIT} on branch ${env.GIT_BRANCH}"
-                echo "App Version: ${env.APP_VERSION}"
             }
         }
 
@@ -89,8 +88,8 @@ pipeline {
             steps {
                 dependencyCheck(
                     additionalArguments: '--scan ./ --out ./ --format XML --format HTML --disableYarnAudit --disableNodeAudit',
-                    odcInstallation: 'Dp-check',
-                    nvdCredentialsId: 'nvd-api-key')
+                    odcInstallation: 'Dp-check'
+                    )
             }
             post {
                 always {
@@ -155,9 +154,8 @@ pipeline {
                 script {
                     // Stop and remove old container if it exists
                     sh """
-                    docker stop ${CONTAINER_NAME} || true
+                    docker kill ${CONTAINER_NAME} || true
                     docker rm ${CONTAINER_NAME} || true
-                    docker rmi \$(docker images -q) || true
                     """
 
                     echo "Existing container ${CONTAINER_NAME} stopped and removed"
@@ -183,18 +181,18 @@ pipeline {
         // ─────────────────────────────────────────────
         stage('Health Check') {
             steps {
-                sh """
+                sh '''
                     # Wait for the application to start
                     sleep 10
 
                     # Check if the application is responding
-                    if curl -sf http://localhost:${HOST_PORT}; then
+                    if curl -sf "http://$(curl -s ipinfo.io/ip):${HOST_PORT}"; then
                         echo "Health check passed: Application is responding"
                     else
                         echo "Health check failed: Application is not responding"
                         exit 1
                     fi
-                """
+                '''
             }
         }
     }
@@ -204,28 +202,34 @@ pipeline {
         success {
             echo "Pipeline executed successfully — ${DOCKER_IMAGE}:${DOCKER_TAG} deployed on port ${HOST_PORT}"
             emailext(
-                to: "${env.RECIPIENTS}",
+                to: '$DEFAULT_RECIPIENTS',
                 subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "Pipeline completed successfully.\nDetails: ${env.BUILD_URL}"
+                body: "Pipeline success completed.\nDetails: ${env.BUILD_URL}, Checked out commit ${env.GIT_COMMIT} on branch ${env.GIT_BRANCH}"
             )
         }
         failure {
             echo "Pipeline failed — Build ${env.BUILD_NUMBER} of ${DOCKER_IMAGE}:${DOCKER_TAG} failed to deploy"
             emailext(
-                to: "${env.RECIPIENTS}",
+                to: '$DEFAULT_RECIPIENTS',
                 subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "Pipeline failed.\nDetails: ${env.BUILD_URL}"
+                body: "Pipeline success completed.\nDetails: ${env.BUILD_URL}, Checked out commit ${env.GIT_COMMIT} on branch ${env.GIT_BRANCH}"
             )
         }
         always {
-            // Clean up only the specific build image; avoid wiping legitimately cached layers
-            sh """
-                docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}        || true
-                docker rmi nikhil74/${DOCKER_IMAGE}:${DOCKER_TAG} || true
-                docker image prune -f                            || true
-            """
-            echo "Old Docker images cleaned up"
-            //cleanWs()
+        sh '''
+        # Get all tags for this image except the current one, then remove them
+        docker images nikhil74/${DOCKER_IMAGE} --format '{{.Tag}}' | \
+        grep -v '^${DOCKER_TAG}\$' | \
+        xargs -I {} docker rmi nikhil74/${DOCKER_IMAGE}:{} || true
+
+        # Remove local build image of current tag (safe — container uses hub image)
+        docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
+
+        # Prune dangling images
+        docker image prune -f || true
+        '''
+        echo "Old Docker images cleaned up (kept current tag: ${DOCKER_TAG})"
+        cleanWs()
         }
     }
 }
