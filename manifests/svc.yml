@@ -4,9 +4,9 @@ kind: Service
 metadata:
   name: mysvc
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
-    app: swiggy
+    app: zomato
   ports:
     - port: 3000
       targetPort: 3000
